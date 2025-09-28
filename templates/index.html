@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智能導覽機械人</title>
+    <style>
+        :root {
+            --primary-color: #007bff; --background-color: #f4f7f9; --text-color: #333;
+            --card-bg-color: #ffffff; --border-color: #dee2e6; --success-color: #28a745;
+            --info-color: #17a2b8;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            display: flex; justify-content: center; align-items: center;
+            min-height: 100vh; margin: 0; background-color: var(--background-color);
+            padding: 1rem; box-sizing: border-box;
+        }
+        .container {
+            width: 100%; max-width: 900px; background-color: var(--card-bg-color);
+            border-radius: 16px; box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            padding: 2rem; display: grid; grid-template-columns: 1fr; gap: 1.5rem;
+        }
+        @media (min-width: 800px) { .container { grid-template-columns: 1fr 1fr; } }
+        h1 {
+            grid-column: 1 / -1; text-align: center; color: var(--primary-color); margin: 0;
+            font-size: 2rem;
+        }
+        .video-container, .interaction-container {
+            display: flex; flex-direction: column; gap: 1.5rem;
+        }
+        .video-wrapper {
+            position: relative; width: 100%; padding-top: 75%; background-color: #333;
+            border-radius: 12px; overflow: hidden; border: 1px solid var(--border-color);
+        }
+        .video-wrapper img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
+        .video-wrapper .placeholder {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; align-items: center; justify-content: center; color: #999;
+        }
+        .result-section {
+            display: none; background-color: #f8f9fa; border: 1px solid var(--border-color);
+            border-radius: 12px; padding: 1rem; animation: fadeIn 0.5s ease-in-out;
+        }
+        .result-section h3 { margin-top: 0; font-size: 1.1rem; }
+        #reasoning-section h3 { color: var(--info-color); }
+        #labels-section h3 { color: var(--success-color); }
+        #recommendation-section h3 { color: var(--primary-color); }
+        #observations-list { list-style-type: '👉'; padding-left: 20px; margin: 0.5rem 0; }
+        #labels-output { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem; }
+        .label-tag { background-color: var(--success-color); color: white; padding: 0.25rem 0.75rem; border-radius: 15px; font-size: 0.9rem; }
+        #recommendation-output img { width: 100%; max-height: 200px; object-fit: cover; border-radius: 8px; margin-bottom: 1rem; }
+        .status-text { text-align: center; color: #6c757d; font-style: italic; min-height: 20px; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>智能導覽機械人</h1>
+        <div class="video-container">
+            <div class="video-wrapper">
+                <div id="placeholder" class="placeholder">等待機器人指令...</div>
+                <img id="robot-image" src="" alt="Live Camera Feed" style="display:none;">
+            </div>
+            <div id="status-area" class="status-text">最後更新時間: N/A</div>
+        </div>
+        <div class="interaction-container">
+            <div id="reasoning-section" class="result-section">
+                <h3>步驟 1: 觀察</h3>
+                <ul id="observations-list"></ul>
+            </div>
+            <div id="labels-section" class="result-section">
+                <h3>步驟 2: 基於觀察嘅分析</h3>
+                <div id="labels-output"></div>
+            </div>
+            <div id="recommendation-section" class="result-section">
+                <h3>步驟 3: 個人化推薦</h3>
+                <div id="recommendation-output"></div>
+            </div>
+        </div>
+    </div>
+
+<script>
+    // 獲取所有需要操作的 DOM 元素
+    const placeholder = document.getElementById('placeholder');
+    const robotImage = document.getElementById('robot-image');
+    const statusArea = document.getElementById('status-area');
+    const reasoningSection = document.getElementById('reasoning-section');
+    const observationsList = document.getElementById('observations-list');
+    const labelsSection = document.getElementById('labels-section');
+    const labelsOutput = document.getElementById('labels-output');
+    const recommendationSection = document.getElementById('recommendation-section');
+    const recommendationOutput = document.getElementById('recommendation-output');
+
+    function updateDashboard() {
+        fetch('/get_latest_data')
+            .then(response => response.json())
+            .then(data => {
+                if (!data.timestamp) return; // 如果沒有時間戳，代表還沒有新數據
+
+                // --- 步驟 1: 重置界面 (關鍵新增步驟) ---
+                // 無論如何，先隱藏所有舊的結果區塊
+                reasoningSection.style.display = 'none';
+                labelsSection.style.display = 'none';
+                recommendationSection.style.display = 'none';
+
+                // 清空舊的內容
+                observationsList.innerHTML = '';
+                labelsOutput.innerHTML = '';
+                recommendationOutput.innerHTML = '';
+
+
+                // --- 步驟 2: 更新左側視覺區 (維持不變) ---
+                placeholder.style.display = 'none';
+                robotImage.style.display = 'block';
+                robotImage.src = data.robot_image_url;
+                statusArea.innerHTML = 收到指令: "<b>${data.prompt_text}</b>"<br>最後更新時間: ${data.timestamp};
+
+                // --- 步驟 3: 根據新數據，填充並顯示界面 ---
+                // 檢查是否有錯誤
+                if (data.reasoning && data.reasoning.error) {
+                    statusArea.innerHTML += <br><b style="color: red;">AI 處理錯誤: ${data.reasoning.error}</b>;
+                    // 因為已經在步驟 1 隱藏了所有區塊，這裡不需要再做隱藏操作
+                    return;
+                }
+
+                // 如果沒有錯誤，正常顯示結果
+                if (data.reasoning) {
+                    // 填充內容
+                    observationsList.innerHTML = data.reasoning.observations
+                        .map(obs => <li>${obs}</li>)
+                        .join('');
+                    labelsOutput.innerHTML = data.reasoning.labels
+                        .map(label => <span class="label-tag">${label}</span>)
+                        .join('');
+
+                    // 填充完畢後再顯示
+                    reasoningSection.style.display = 'block';
+                    labelsSection.style.display = 'block';
+                }
+
+                if (data.recommendation) {
+                    const rec = data.recommendation;
+                    const exhibitImageHTML = rec.exhibit_image_url ? <img src="${rec.exhibit_image_url}" alt="${rec.exhibit_name}"> : '';
+
+                    recommendationOutput.innerHTML = `
+                        ${exhibitImageHTML}
+                        <h4>${rec.exhibit_name}</h4>
+                        <p>${data.final_response}</p>
+                    `;
+                    // 填充完畢後再顯示
+                    recommendationSection.style.display = 'block';
+                }
+            })
+            .catch(error => {
+                console.error('更新儀表板失敗:', error);
+                statusArea.textContent = "與伺服器斷線，正在嘗試重新連接...";
+            });
+
+    }
+
+    // 每 1.5 秒自動執行一次 updateDashboard 函式
+    setInterval(updateDashboard, 1500);
+</script>
+</body>
+</html>
