@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>智能導覽機器人</title>
+    <title>智能導覽機械人</title>
     <style>
         :root {
             --primary-color: #007bff; --background-color: #f4f7f9; --text-color: #333;
@@ -30,14 +30,17 @@
             display: flex; flex-direction: column; gap: 1.5rem;
         }
         .video-wrapper {
-            position: relative; width: 100%; padding-top: 75%; background-color: #333;
+            position: relative; width: 100%; padding-top: 75%; background-color: #000;
             border-radius: 12px; overflow: hidden; border: 1px solid var(--border-color);
         }
         .video-wrapper img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
-        .video-wrapper .placeholder {
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            display: flex; align-items: center; justify-content: center; color: #999;
-        }
+        #prompt-form { display: flex; gap: 0.5rem; }
+        #prompt { flex-grow: 1; padding: 0.75rem; border: 1px solid var(--border-color); border-radius: 8px; font-size: 1rem; }
+        #voice-btn, #submit-btn { padding: 0.75rem; border: none; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+        #voice-btn { background-color: #6c757d; color: white; }
+        #voice-btn.recording { background-color: #dc3545; }
+        #submit-btn { background-color: var(--primary-color); color: white; }
+        #submit-btn:disabled { background-color: #a0a0a0; cursor: not-allowed; }
         .result-section {
             display: none; background-color: #f8f9fa; border: 1px solid var(--border-color);
             border-radius: 12px; padding: 1rem; animation: fadeIn 0.5s ease-in-out;
@@ -56,17 +59,19 @@
 </head>
 <body>
     <div class="container">
-        <h1>智能導覽機器人</h1>
+        <h1>智能導覽機械人</h1>
         <div class="video-container">
-            <div class="video-wrapper">
-                <div id="placeholder" class="placeholder">等待機器人指令...</div>
-                <img id="robot-image" src="" alt="Live Camera Feed" style="display:none;">
-            </div>
-            <div id="status-area" class="status-text">最後更新時間: N/A</div>
+            <div class="video-wrapper"><img src="{{ url_for('video_feed') }}" alt="Live Camera Feed"></div>
+            <form id="prompt-form">
+                <input id="prompt" name="prompt" placeholder="按麥克風或輸入指令 (e.g. 機器人...)" required>
+                <button type="button" id="voice-btn" title="語音輸入">🎤</button>
+                <button type="submit" id="submit-btn">送出</button>
+            </form>
         </div>
         <div class="interaction-container">
+            <div id="status-area" class="status-text">你好！歡迎嚟到博物館！</div>
             <div id="reasoning-section" class="result-section">
-                <h3>步驟 1: 觀察</h3>
+                <h3>步驟 1: 我的觀察</h3>
                 <ul id="observations-list"></ul>
             </div>
             <div id="labels-section" class="result-section">
@@ -80,87 +85,120 @@
         </div>
     </div>
 
-<script>
-    // 獲取所有需要操作的 DOM 元素
-    const placeholder = document.getElementById('placeholder');
-    const robotImage = document.getElementById('robot-image');
-    const statusArea = document.getElementById('status-area');
-    const reasoningSection = document.getElementById('reasoning-section');
-    const observationsList = document.getElementById('observations-list');
-    const labelsSection = document.getElementById('labels-section');
-    const labelsOutput = document.getElementById('labels-output');
-    const recommendationSection = document.getElementById('recommendation-section');
-    const recommendationOutput = document.getElementById('recommendation-output');
+    <script>
+        const form = document.getElementById('prompt-form');
+        const input = document.getElementById('prompt');
+        const submitBtn = document.getElementById('submit-btn');
+        const voiceBtn = document.getElementById('voice-btn');
+        const statusArea = document.getElementById('status-area');
+        const reasoningSection = document.getElementById('reasoning-section');
+        const observationsList = document.getElementById('observations-list');
+        const labelsSection = document.getElementById('labels-section');
+        const labelsOutput = document.getElementById('labels-output');
+        const recommendationSection = document.getElementById('recommendation-section');
+        const recommendationOutput = document.getElementById('recommendation-output');
 
-    function updateDashboard() {
-        fetch('/get_latest_data')
-            .then(response => response.json())
-            .then(data => {
-                if (!data.timestamp) return; // 如果沒有時間戳，代表還沒有新數據
+        // --- 主要修改：語音辨識邏輯 ---
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (SpeechRecognition) {
+            const recognition = new SpeechRecognition();
+            recognition.lang = 'yue-Hant-HK';
+            recognition.continuous = true; // 確保它在停頓後會結束
+            recognition.interimResults = false;
 
-                // --- 步驟 1: 重置界面 (關鍵新增步驟) ---
-                // 無論如何，先隱藏所有舊的結果區塊
-                reasoningSection.style.display = 'none';
-                labelsSection.style.display = 'none';
-                recommendationSection.style.display = 'none';
+            recognition.onstart = () => {
+                voiceBtn.classList.add('recording');
+                voiceBtn.textContent = '🔴';
+            };
 
-                // 清空舊的內容
-                observationsList.innerHTML = '';
-                labelsOutput.innerHTML = '';
-                recommendationOutput.innerHTML = '';
+            // onresult 的職責簡化：只負責更新輸入框的文字
+            recognition.onresult = (event) => {
+                const transcript = event.results[event.results.length - 1][0].transcript;
+                input.value = transcript;
+            };
 
+            // onend 的職責：在辨識完全結束後，才檢查並提交
+            recognition.onend = () => {
+                voiceBtn.classList.remove('recording');
+                voiceBtn.textContent = '🎤';
 
-                // --- 步驟 2: 更新左側視覺區 (維持不變) ---
-                placeholder.style.display = 'none';
-                robotImage.style.display = 'block';
-                robotImage.src = data.robot_image_url;
-                statusArea.innerHTML = 收到指令: "<b>${data.prompt_text}</b>"<br>最後更新時間: ${data.timestamp};
+                const finalTranscript = input.value.trim();
 
-                // --- 步驟 3: 根據新數據，填充並顯示界面 ---
-                // 檢查是否有錯誤
-                if (data.reasoning && data.reasoning.error) {
-                    statusArea.innerHTML += <br><b style="color: red;">AI 處理錯誤: ${data.reasoning.error}</b>;
-                    // 因為已經在步驟 1 隱藏了所有區塊，這裡不需要再做隱藏操作
-                    return;
+                // 檢查最終的完整句子是否符合提交條件
+                if (finalTranscript.startsWith('機器人') || finalTranscript.startsWith('機械人')) {
+                    console.log("語音辨識結束，提交表單...");
+                    form.dispatchEvent(new Event('submit'));
+                } else if (finalTranscript) { // 如果有文字但沒有觸發詞
+                    statusArea.textContent = "請用「機器人」或「機械人」開頭向我提問哦！";
                 }
+            };
 
-                // 如果沒有錯誤，正常顯示結果
-                if (data.reasoning) {
-                    // 填充內容
-                    observationsList.innerHTML = data.reasoning.observations
-                        .map(obs => <li>${obs}</li>)
-                        .join('');
-                    labelsOutput.innerHTML = data.reasoning.labels
-                        .map(label => <span class="label-tag">${label}</span>)
-                        .join('');
-
-                    // 填充完畢後再顯示
-                    reasoningSection.style.display = 'block';
-                    labelsSection.style.display = 'block';
+            recognition.onerror = (event) => {
+                statusArea.textContent = '語音辨識錯誤: ' + event.error;
+                voiceBtn.classList.remove('recording');
+                voiceBtn.textContent = '🎤';
+            };
+            
+            voiceBtn.addEventListener('click', () => {
+                if (voiceBtn.classList.contains('recording')) {
+                    recognition.stop();
+                } else {
+                    recognition.start();
                 }
-
-                if (data.recommendation) {
-                    const rec = data.recommendation;
-                    const exhibitImageHTML = rec.exhibit_image_url ? <img src="${rec.exhibit_image_url}" alt="${rec.exhibit_name}"> : '';
-
-                    recommendationOutput.innerHTML = `
-                        ${exhibitImageHTML}
-                        <h4>${rec.exhibit_name}</h4>
-                        <p>${data.final_response}</p>
-                    `;
-                    // 填充完畢後再顯示
-                    recommendationSection.style.display = 'block';
-                }
-            })
-            .catch(error => {
-                console.error('更新儀表板失敗:', error);
-                statusArea.textContent = "與伺服器斷線，正在嘗試重新連接...";
             });
+        } else {
+            voiceBtn.style.display = 'none';
+        }
 
-    }
+        // --- 表單提交處理 (維持不變) ---
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            if (!input.value.trim()) return;
 
-    // 每 1.5 秒自動執行一次 updateDashboard 函式
-    setInterval(updateDashboard, 1500);
-</script>
+            submitBtn.disabled = true;
+            submitBtn.textContent = '思考中...';
+            statusArea.textContent = '收到指令，正在觀察同分析...';
+            reasoningSection.style.display = 'none';
+            labelsSection.style.display = 'none';
+            recommendationSection.style.display = 'none';
+
+            try {
+                const response = await fetch("{{ url_for('ask_gemini') }}", {
+                    method: 'POST',
+                    body: new FormData(form)
+                });
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.error || '未知錯誤');
+                
+                observationsList.innerHTML = result.reasoning.observations
+                    .map(obs => `<li>${obs}</li>`)
+                    .join('');
+                reasoningSection.style.display = 'block';
+                statusArea.textContent = '觀察完成！正在為您分析興趣標籤...';
+
+                labelsOutput.innerHTML = result.reasoning.labels
+                    .map(label => `<span class="label-tag">${label}</span>`)
+                    .join('');
+                labelsSection.style.display = 'block';
+                statusArea.textContent = '分析完成！正在為您尋找最匹配嘅展品...';
+
+                const rec = result.recommendation;
+                recommendationOutput.innerHTML = `
+                    <img src="${rec.image_url}" alt="${rec.name}">
+                    <h4>${rec.name}</h4>
+                    <p>${rec.full_text}</p>
+                `;
+                recommendationSection.style.display = 'block';
+                statusArea.textContent = '推薦完成！';
+
+            } catch (error) {
+                console.error('請求失敗:', error);
+                statusArea.textContent = '發生錯誤：' + error.message;
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = '送出';
+            }
+        });
+    </script>
 </body>
 </html>
